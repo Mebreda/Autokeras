@@ -6,6 +6,8 @@ from keras.models import load_model
 from PIL import Image
 import autokeras as ak
 import tarfile
+import zipfile
+import json
 
 app = Flask(__name__)
 model = None
@@ -14,6 +16,13 @@ model = None
 # Endpoint to receive blob data
 @app.route('/predict', methods=['POST'])
 def predict_blob():
+    model = load_model('extracted_contents/Chicken Model', custom_objects=ak.CUSTOM_OBJECTS)
+
+
+    with open('label_names.json', 'r') as f:
+        label_names = json.load(f)
+
+
     blob_data = request.data
     image_stream = io.BytesIO(blob_data)
     
@@ -32,27 +41,60 @@ def predict_blob():
     # Perform predictions
     prediction = model.predict(img_array)
 
+    print(prediction)
+
+    label_names_swapped = {v: k for k, v in label_names.items()}
+    predictions_array = []
+
+    if(len(prediction) == 1):
+        predictions_array.append([label_names_swapped[0], prediction[0][0]])
+        predictions_array.append([label_names_swapped[1], 1-prediction[0][0]])
+
+    else:
+        label_index = 0
+        for x in label_names:
+            predictions_array.append([label_names_swapped[x], prediction[0][label_index]])
+            label_index += 1
+
+    print(predictions_array)
 
     # Convert the prediction to bytes
-    prediction_bytes = prediction.tobytes()
-
-    # Convert the preprocessed image to bytes
-    img_byte_arr = io.BytesIO()
-    img.save(img_byte_arr, format='PNG')
-    img_byte_arr = img_byte_arr.getvalue()
-
-    # Concatenate the prediction and image bytes
-    combined_data = prediction_bytes + img_byte_arr
+    predictions_json = json.dumps([[item[0], float(item[1])] for item in predictions_array])
+    predictions_bytes = predictions_json.encode('utf-8')
 
     # Return the combined data as a single response
-    return send_file(io.BytesIO(combined_data), mimetype='application/octet-stream')
+    return send_file(io.BytesIO(predictions_bytes), mimetype='application/octet-stream')
+
+
+
+def extract_zip(zip_filename, extract_to):
+    # Open the zip file
+    with zipfile.ZipFile(zip_filename, 'r') as zip_ref:
+        # Extract all the contents to the specified directory
+        zip_ref.extractall(extract_to)
+
 
 
 # Load model from desktop
 
 def load_model_from_desktop(model_url):
     global model
-    model = load_model(model_url, custom_objects=ak.CUSTOM_OBJECTS)
+    global label_names
+    # Specify the name of the zip file
+    zip_file_name = 'Chicken_model_directory.zip'
+
+    # Specify the directory to extract the contents to
+    extract_to_directory = 'extracted_contents'
+
+    # Call the function to extract the zip file
+    extract_zip(zip_file_name, extract_to_directory)
+    model = load_model('extracted_contents/Chicken Model', custom_objects=ak.CUSTOM_OBJECTS)
+
+
+    with open('label_names.json', 'r') as f:
+        label_names = json.load(f)
+
+    
 
 
 if __name__ == '__main__':
